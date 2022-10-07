@@ -1,0 +1,346 @@
+---
+title: "Logistic Regression V6 (high dimension) (Simplify)"
+header-includes:
+- \usepackage{fontspec} # 使用 fontspec package
+- \usepackage{xeCJK}    # 使用 xeCJK package
+- \setCJKmainfont{Songti TC} # 指定主要的字型，windows 使用者可用「標楷體」、「新細明體」，或是依照您安裝的字型名稱輸入
+author: 戴傳軒
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 2
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    code_folding: hide
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+# Preparation (Data Generating and Exploring)
+
+```{r, echo=FALSE, include = FALSE}
+set.seed(123)
+rm(list = ls())
+library("pROC")  # Draw the Receiver Operating Characteristics (curve)
+library("matlib")  # Allows some math operations
+library("MASS")  # Allows some math operations
+library("tictoc")  # Recording running time
+library("psych")  # Correlation plot
+library("stringr")  # String operation
+#library("ggplot2")
+library("caret")   # Draw the confusion matrix
+```
+
+#### Generating Data
+
+```{r}
+# Handmade data
+gen_da <- function(n, p){
+  x <- matrix(rnorm(n*(p-1), 0, 5), n, p-1)
+  beta <- matrix(c(550,runif(p-1, -1, 2.3)), p, 1)
+  xt <- cbind(matrix(1, n, 1), x)
+  xb <- xt %*% beta
+  p <- 1 / (1 + exp(-xb))
+  #show(str_c(c("The true beta is", beta, collapse = " ")))
+  show(str_c(c("The average of the probabilities is", sum(p)/n), collapse = " "))
+  y <- rbinom(n, size = 1, prob = p)
+  
+  return(cbind(y, x))
+}
+n <- 1000  # Amount of generated data
+p <- 2000
+da <- as.data.frame(gen_da(n, p))  # Generating data
+```
+
+#### Explore Data Analysis
+
+```{r}
+#summary(da)
+#str(da)
+hist(da$y)
+# plot(da, col = da[, 1] + 1)
+# corPlot(da, cex = 1.2)
+```
+
+#### Training and Testing Sets Setting Up
+
+```{r}
+nt <- n * 4 / 5
+ind <- sample(c(1:n), nt)
+train <- da[ind, ]
+test <- da[-ind, ]
+```
+
+### Evaluation Function of the Estimation
+
+(Accuracy, ROC, Deviance)
+
+```{r}
+### b:p*1,  data:n*p,   algorithm:GLM Quasi...,   threshold:of determine one or zero
+Logistic_Regression_Evaluation <- function(b, data, predict = F, algorithm, threshold = 0.5, ROCcurve = F){
+  
+  if(predict == T){
+    datatype <- "testing set"
+  }else if(predict == F){
+    datatype <- "training set"
+  }else{
+    return("Wrong with datatype input")
+  }
+  
+  n <- length(data[, 1])
+  p <- length(data[1, ]) - 1 + 1  # Minus 1 due to y, add 1 due to one more column for ones
+  y <- as.matrix(data[, 1])
+  x <- as.matrix(cbind(matrix(1, n, 1), data[, -1]))
+  p_hat <- 1 / (1 + exp(-x %*% b)) # estimated probabilities
+  y_hat <- ifelse(p_hat > threshold, 1, 0)
+  
+  confusion <- confusionMatrix(as.factor(y_hat), as.factor(y))
+  show(confusion)
+  # accuracy <- (confusion[1] + confusion[4]) / sum(confusion)
+  # result <- c("Accuracy of", datatype, "in", algorithm, "with threshold", threshold, "is", accuracy)
+  # result <- str_c(result, collapse = " ")
+  # show(result)
+  
+  if(ROCcurve == T){
+    ROCcurve = roc(y ~ as.numeric(p_hat))
+    print(ROCcurve)
+    plot(ROCcurve, 
+         ylab = "Sensitivity (True Positive Rate)", ylim = c(0,1),
+         xlab = "Specificity (1 - False Positive Rate)", xlim = c(1.2, -0.2),
+         print.auc = T, print.auc.x = 0.4, print.auc.y = 0.4,
+         print.thres = T, print.thres.cex = 1,
+         grid = T, auc.polygon = T,
+         lwd = 3, identity.lty = 2, identity.lwd = 2)  
+  }
+}
+
+
+Deviance <- function(b, data) {
+  n <- length(data[, 1])
+  y <- as.matrix(data[, 1])
+  x <- as.matrix(cbind(matrix(1, n, 1), data[, -1]))
+  phat <- 1 / (1 + exp(-x %*% b)) # estimated probabilities
+  
+  df <- as.matrix(n - length(x[1, ]))  # degree of freedom
+  colnames(df) <- "degree of freedom"
+  
+  deviance <- -2 * (t(y) %*% log(phat) + t(1-y) %*% log(1-phat))
+  colnames(deviance) <- "deviance"
+  
+  deviance[is.nan(deviance)] <- 0
+  
+  return(cbind(df, deviance))
+}
+```
+
+# Package's Results (Linear Model)
+
+### Package Summary
+
+```{r}
+tic("LM by package")
+mod0 <- lm(train)
+toc()
+tic.clear()
+par(mfrow=c(1,2))
+plot(train$y, mod0$residuals)
+qqnorm(mod0$residuals)
+```
+
+
+# Package's Results (GLM)
+
+### Package Summary
+
+```{r}
+tic("GLM by package")
+mod1 <- glm(train, family = "binomial")
+toc()
+tic.clear()
+# summary(mod1)
+head(mod1$coefficients)
+summary(mod1$coefficients)
+str(mod1$coefficients)
+```
+
+<!-- ### Accuracy and Receiver Operating Characteristics (ROC) -->
+
+<!-- ```{r} -->
+<!-- par(mfrow = c(1, 2)) -->
+<!-- #### Training -->
+<!-- Logistic_Regression_Evaluation(mod1$coefficients, train, algorithm = "GLM package", ROCcurve = T) -->
+<!-- #### Testing -->
+<!-- Logistic_Regression_Evaluation(mod1$coefficients, test, predict = T, algorithm = "GLM package", ROCcurve = T) -->
+<!-- ``` -->
+
+# Package's Results (Quasi-Likelihood)
+
+### Package Summary
+
+```{r}
+tic("Quasi-Likelihood by package")
+mod2 <- glm(train, family = "quasibinomial")
+toc()
+tic.clear()
+# summary(mod2)
+head(mod2$coefficients)
+summary(mod2$coefficients)
+str(mod2$coefficients)
+```
+
+<!-- ### Accuracy and Receiver Operating Characteristics (ROC) -->
+
+<!-- ```{r} -->
+<!-- par(mfrow = c(1, 2)) -->
+<!-- #### Training -->
+<!-- Logistic_Regression_Evaluation(mod2$coefficients, train, algorithm = "Quasi-Likelihood by package", ROCcurve = T) -->
+<!-- #### Testing -->
+<!-- Logistic_Regression_Evaluation(mod2$coefficients, test, predict = T,  -->
+<!--                                algorithm = "Quasi-Likelihood by package", ROCcurve = T) -->
+<!-- ``` -->
+
+# Constructing Iteration (GLM)
+
+### Iteration Rule (Function)
+### Count Limit 25
+
+```{r}
+Logistic_Regression <- function(train) {
+  n <- length(train[, 1])
+  p <- length(train[1, ]) - 1 + 1  # Minus 1 due to y, add 1 due to one more column for ones
+  
+  ### Initial Value of Beta
+  b <- as.matrix(matrix(0, p, 1))
+  y <- as.matrix(train[, 1])
+  x <- as.matrix(cbind(matrix(1, n, 1), train[, -1]))
+  mu <- matrix(0, n, 1)
+  v <- matrix(0, n, n)
+  count <- 0
+  
+  repeat {
+    for (i in c(1:n)) {
+      xb <- t(b) %*% x[i, ]
+      mu[i] <- 1 / (1 + exp(-xb))
+      ### nan produced here due to the infinity of denominator
+      v[i, i] <- exp(xb) / (1 + exp(xb)) ^ 2   
+    }
+    v[is.nan(v)] <- 0
+    U <- t(x) %*% (y - mu)
+    if (sum(U ^ 2) < 10 ^ -5) {
+      break
+    } else{
+      b <- b + ginv(t(x) %*% v %*% x) %*% U
+      count <- count + 1
+      if(count >= 25){
+        break
+      }
+    }
+  }
+  count <- c("Iteration ", count, "times.")
+  show(str_c(count, collapse = " "))
+  return(b)
+}
+```
+
+### Full Model
+
+```{r}
+tic("GLM by Constructing Iteration")
+b_hat <- Logistic_Regression(train)
+toc()
+tic.clear()
+head(b_hat)
+summary(b_hat)
+str(b_hat)
+```
+
+### Accuracy and Receiver Operating Characteristics (ROC)
+
+```{r}
+par(mfrow = c(1, 2))
+#### Training
+Logistic_Regression_Evaluation(b_hat, train, algorithm = "GLM by constructing iteration in full model", ROCcurve = T)
+#### Testing
+Logistic_Regression_Evaluation(b_hat, test, predict = T, 
+                               algorithm = "GLM by constructing iteration in full model", ROCcurve = T)
+```
+
+### Deviance
+
+```{r}
+### Residuals Deviance (Full Model)
+residuals_deviance <- Deviance(b_hat, train)
+show(residuals_deviance)
+```
+
+### Null Model
+
+```{r}
+tic("Null Model Iteration")
+b_hat <- Logistic_Regression(matrix(train[, 1]))
+toc()
+tic.clear()
+head(b_hat)
+summary(b_hat)
+str(b_hat)
+```
+
+### Accuracy
+
+```{r}
+par(mfrow = c(1, 2))
+#### Training
+Logistic_Regression_Evaluation(b_hat, matrix(train[, 1]), 
+                               algorithm = "GLM by constructing iteration in null model", ROCcurve = T)
+#### Testing
+Logistic_Regression_Evaluation(b_hat, matrix(test[, 1]), predict = T, 
+                               algorithm = "GLM by constructing iteration in null model", ROCcurve = T)
+```
+
+### Deviance
+
+```{r}
+### Null Deviance (Null Model)
+null_deviance <- Deviance(b_hat, matrix(train[, 1]))
+show(null_deviance)
+```
+
+### Hypothesis Test
+
+(H0: all beta are 0 v.s. H1: not all beta are 0)
+
+```{r}
+deviancediff <- null_deviance - residuals_deviance
+show(null_deviance)
+show(residuals_deviance)
+show(deviancediff)
+
+alpha <- 0.05
+if (deviancediff[2] > qchisq(alpha, deviancediff[1], lower.tail = F)){
+  print("Reject H0")
+}else{
+  print("Not reject H0")
+}
+### equivalently
+# if (alpha > pchisq(deviancediff[2], deviancediff[1], lower.tail = F)){
+#   print("Reject H0")
+# }else{
+#   print("Not reject H0")
+# }
+```
+
+### Pesudo R-Squared
+
+```{r}
+pseudoRsquared <- 1 - (residuals_deviance[2]/null_deviance[2])
+show(pseudoRsquared)
+```
+
+
+
+
+# Constructing Iteration (Quasi-Likelihood)
+Note that this part is the same as last one if the chosen link is canonical. 
+
